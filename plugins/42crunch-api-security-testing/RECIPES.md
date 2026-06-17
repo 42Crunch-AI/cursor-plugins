@@ -24,12 +24,12 @@ findings, and optionally apply fixes.
 
 ## Recipe 2 — Fix-Only Audit (Existing Report)
 
-**When to use**: You already have an audit report (`report.json`)
+**When to use**: You already have an audit report (`report.json` / `todo.json`)
 from a previous run and want to skip re-running the audit and go straight to
 applying the fixes it requires.
 
 **What to say**:
-> "Fix the audit issues in `report.json` for `openapi.json`"
+> "Fix the audit issues in `/tmp/42c-audit/todo.json` for `openapi.json`"
 
 or
 
@@ -45,7 +45,8 @@ or
 6. Final summary (no score-change delta since no fresh audit was run)
 
 **Notes**:
-- The report file must be in `json` format produced by `42c-ast audit run` or by the 42crunch extension audit function and exported to JSON format.
+- The report file must be a `todo.json` or `report.json` produced by `42c-ast audit run`.
+- The skill will not re-run the binary, so no credentials are needed for this step.
 - After fixes are applied you may want to run a fresh audit to confirm SQG now passes.
 
 ---

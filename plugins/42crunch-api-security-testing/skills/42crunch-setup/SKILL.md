@@ -64,7 +64,7 @@ The procedure covers, in order:
     - Yes → enter API Key → select Platform URL (US / EU / Other)
     - No → **Are you a registered 42Crunch Free Trial user?**
       - Yes → enter Free Trial Token
-      - No → show registration link (`[42Crunch Free Trial](https://42crunch.com/freemium/?source=claude)`) and stop
+      - No → show registration link (`[42Crunch Free Trial](https://42crunch.com/freemium/?source=cursor)`) and stop
 - Write credentials to `~/.42crunch/conf/env`, set `chmod 600` on macOS/Linux.
 
 ### Step 4 — Final verification
@@ -150,8 +150,8 @@ off.
   it. Always mask it (`api_••••••••` / `ide_••••••••` for platform tokens — keep
   prefix, replace rest; `<first-4-chars>••••••••` for free trial tokens, e.g.
   `eyJh••••••••`).
-- Use the `Bash` tool for all shell commands; use the `Edit` or `Write`
-  tools when writing config files — never shell redirection.
+- Use `bash_tool` for all shell commands; use `str_replace_editor` or
+  `create_file` when writing config files — never shell redirection.
 - Use `curl` for downloads; fall back to `wget` if `curl` is unavailable. On
   Windows use `Invoke-WebRequest`.
 - On Windows: binary filename is `42c-ast.exe`, paths use `\`, config lives in
