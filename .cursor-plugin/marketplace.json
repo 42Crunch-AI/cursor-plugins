@@ -5,14 +5,14 @@
     "email": "support@42crunch.com"
   },
   "metadata": {
-    "description": "42Crunch Marketplace for Cursor Plugin"
+    "description": "42Crunch Marketplace for Cursor Plugin",
+    "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "42crunch-api-security-testing",
-      "source": "./plugins/42crunch-api-security-testing",
-      "description": "Catch API security issues during development: audit, scan, remediate, validate with AI guardrails in Cursor.",
-      "version": "1.0.0"
+      "source": "plugins/42crunch-api-security-testing",
+      "description": "Catch API security issues during development: audit, scan, remediate, validate with AI guardrails in Cursor."
     }
   ]
 }
