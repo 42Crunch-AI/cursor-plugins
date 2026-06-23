@@ -22,7 +22,7 @@ file (`openapi.json`). No existing OAS file is required as input.
 
 Ask the user for the required inputs, then execute Steps 1–8.
 
-**Call `AskUserQuestion`:**
+**Call `AskQuestion`:**
 - **question**:
   ```
   Please provide the following inputs:

@@ -94,10 +94,10 @@ Otherwise omit the interpretation line; SQG PASSED/FAILED in the headline is the
 > `This improvement moves your API from failing to passing the SQG threshold.`
 
 **Free Trial mode only** — before rendering the findings report, prompt the user for session
-thresholds (call `AskUserQuestion` with two questions):
+thresholds (call `AskQuestion` with two questions):
 - **Question 1**: `"What minimum score are you targeting for this API?"` — options:
   `["90+ — Excellent", "70 — Good baseline", "50 — Acceptable for now", "Custom — I'll enter a number"]`
-  If "Custom" is chosen, call a follow-up `AskUserQuestion` for the numeric value.
+  If "Custom" is chosen, ask conversationally for the numeric value.
 - **Question 2**: `"What is the lowest severity you want treated as a blocking issue?"` — options:
   `["CRITICAL only", "HIGH and above", "MEDIUM and above", "All findings (including LOW)"]`
 
@@ -274,12 +274,12 @@ them by number in their consent response.
 
 ## Step 3 — Consent Gate
 
-After rendering the report, call `AskUserQuestion`:
+After rendering the report, call `AskQuestion`:
 - **question**: `"I found N SQG-blocking issue(s) (🔴) that must be fixed to pass the SQG, plus M additional finding(s) for your information. For the blocking issues I propose the following changes to <filename>: 1. [issue title] → [one-line fix description] 2. ... What would you like to do?"`
 - **options**: `["Yes — apply all fixes now", "Show me the diff first", "No — skip fixes for now"]`
 
 If the user chooses **"Show me the diff first"**, display the proposed change for each
-issue one at a time in unified diff format, then call `AskUserQuestion`:
+issue one at a time in unified diff format, then call `AskQuestion`:
 - **question**: `"Apply this change?"` — **options**: `["Yes", "No — skip this one"]`
 
 Only advance to the next fix after the user confirms the current one.
@@ -292,7 +292,7 @@ For findings that represent a **spec/implementation mismatch** (e.g. `additional
 where the server actually returns those fields, HTTP vs HTTPS in `servers`, undocumented security
 schemes, or response bodies wider than the schema), do **not** assume the OAS is the source of
 truth. Instead, present the choice explicitly before applying the fix:
-- Call `AskUserQuestion`:
+- Call `AskQuestion`:
   - **question**: `"For [issue title] at [OAS path]: the spec and implementation disagree. Which should be the source of truth?"` — options: `["Fix the OAS to match the implementation", "Fix the implementation to match the OAS", "Skip this one"]`
 - Apply the fix in whichever direction the user chooses.
 - Pure security issues (missing patterns, unbounded arrays, undocumented 403/429 responses, etc.)

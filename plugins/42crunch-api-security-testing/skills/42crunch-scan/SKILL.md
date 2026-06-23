@@ -37,7 +37,7 @@ running `42crunch-audit` first.
    - If `SCAN42C_HOST` environment variable is set → announce silently:
      > "Using scan target from SCAN42C_HOST: `<url>`"
      Store as `SCAN_TARGET_URL` and proceed.
-   - If not set → call `AskUserQuestion`:
+   - If not set → call `AskQuestion`:
      - **question**: `"The OAS points to <servers[0].url> as the API target. Is this the right URL to scan against?"` — options: `["Yes — use this URL", "No — I'll provide a different URL"]`
      - If **No** → ask the user to provide the URL and store it as `SCAN_TARGET_URL`.
      - If **Yes** → store `servers[0].url` as `SCAN_TARGET_URL`.
@@ -63,7 +63,7 @@ running `42crunch-audit` first.
      Mode:     Platform / Free Trial
    ```
 
-   Then call `AskUserQuestion`:
+   Then call `AskQuestion`:
    - **question**: `"I'm ready to start configuring the scan. I'll ask for credentials, classify your operations, and set up test scenarios — then run a happy path validation before the full scan. Shall I proceed?"`
    - **options**: `["Yes, let's configure", "No, cancel"]`
 

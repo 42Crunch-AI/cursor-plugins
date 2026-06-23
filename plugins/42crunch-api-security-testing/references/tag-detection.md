@@ -31,7 +31,7 @@ the **absolute path** of the current OAS file.
 
 ## Step 2 — Ask the user how to proceed
 
-Call `AskUserQuestion`:
+Call `AskQuestion`:
 
 - **question**: `"This API doesn't have a platform tag assigned yet. Tags apply your organisation's Security Quality Gates, customisations, and data dictionaries. How would you like to proceed?"`
 - **options**:
@@ -108,7 +108,7 @@ Build the option list:
 2. If `category_offset + 3 < total categories` → add a final option:
    **`"More categories…"`** — description: `"Show the next set of categories"`
 
-Call `AskUserQuestion`:
+Call `AskQuestion`:
 - **question**: `"Which category does <filename> belong to?"`
 - **options**: the list built above (2–4 options)
 
@@ -137,7 +137,7 @@ Build the option list:
 3. If `multiple_categories` → add **`"← Back to categories"`** —
    description: `"Return to category selection"`
 
-Call `AskUserQuestion`:
+Call `AskQuestion`:
 - **question**: `"Which tag should be applied to <filename>? (Category: <selected_category.name>)"`
 - **options**: the list built above (2–4 options)
 

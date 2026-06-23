@@ -25,7 +25,7 @@ Does **not** run a live scan — use the `42crunch-scan` skill for that.
    file selection, use the context `"audit"` (e.g. "Which one should I audit?").
    Do not proceed if any step fails or the user cancels.
 
-2. **Ask for permission.** Call `AskUserQuestion`:
+2. **Ask for permission.** Call `AskQuestion`:
    - **question**: `"Ready to run a 42Crunch Audit on <filename>. This will analyse your OAS file and produce a scored report. Shall I proceed?"`
    - **options**: `["Yes, proceed", "No, cancel"]`
 

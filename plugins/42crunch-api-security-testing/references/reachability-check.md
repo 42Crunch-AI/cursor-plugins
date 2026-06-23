@@ -14,7 +14,7 @@ curl -s -o /dev/null -w "%{http_code}" --max-time 5 <SCAN_TARGET_URL>/
 ```
 
 - **2xx, 3xx, 401, 403, or 405** → API is reachable. Proceed silently.
-- **Connection refused or timeout** → call `AskUserQuestion`:
+- **Connection refused or timeout** → call `AskQuestion`:
   - **question**: `"I couldn't reach <SCAN_TARGET_URL> — the connection timed out or was refused. How would you like to proceed?"`
   - **options**: `["Try a different URL", "Continue anyway — the API may be temporarily down", "Cancel"]`
   - If **Try a different URL** → ask for new URL, store as `SCAN_TARGET_URL`, re-run from Stage 1.
@@ -34,8 +34,8 @@ curl -s -o /dev/null -w "%{http_code}" --max-time 5 <SCAN_TARGET_URL><first_simp
 ```
 
 - **Any HTTP response** → server is up; root just has no handler. Proceed silently.
-- **Connection refused or timeout** → same `AskUserQuestion` as Stage 1.
-- **404 again** → call `AskUserQuestion`:
+- **Connection refused or timeout** → same `AskQuestion` as Stage 1.
+- **404 again** → call `AskQuestion`:
   - **question**: `"The server responded but both / and <path> returned 404 — the base URL may be incorrect (the API may be mounted at a different prefix). How would you like to proceed?"`
   - **options**: `["Try a different URL", "Continue anyway", "Cancel"]`
   - If **Try a different URL** → ask for new URL, store as `SCAN_TARGET_URL`, re-run from Stage 1.
