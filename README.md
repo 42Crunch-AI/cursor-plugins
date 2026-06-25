@@ -29,14 +29,11 @@ The [Cursor CLI](https://cursor.com/cli) is required to add marketplaces and ins
 
 Register the 42Crunch marketplace with Cursor:
 
-#### Using Cursor CLI
+#### Using Cursor CLI interactive session
 
-```
-agent plugin marketplace add https://github.com/42Crunch-AI/cursor-plugins
-```
+1. In terminal/command prompt, type `agent` and press **Enter** to run the Cursor CLI agent.
 
-#### Or Using an interactive Cursor session
-
+2. Add the 42Crunch Marketplace:
 ```
 /plugin marketplace add https://github.com/42Crunch-AI/cursor-plugins
 ```
@@ -50,17 +47,25 @@ AI-powered API security plugin backed by 42Crunch. Audit OpenAPI specs, detect O
 **Install:**
 After registering the marketplace (see above), install the plugin:
 
-#### Using Cursor CLI
+#### Using Cursor CLI interactive session
 
-```
-agent plugin install 42crunch-api-security-testing@42crunch-marketplace
-```
+1. In terminal/command prompt, type `agent` and press **Enter** to run the Cursor CLI agent.
 
-#### Or Using an interactive Cursor session
+2. Type `/plugin` to open the plugin manager.
 
-```
-/plugin install 42crunch-api-security-testing@42crunch-marketplace
-```
+3. Navigate to **Marketplace** using the right-arrow key and search for the 42Crunch plugin:
+  - Type '42crunch' in the search bar
+  - Press **Enter** to select the 42Crunch API Security Testing plugin
+
+![Plugin Search](docs/images/cursor-plugin-search.png)
+
+5. Select the scope of installation:
+
+![Plugin Scope](docs/images/cursor-plugin-scope.png)
+
+6. Press **Enter** to install:
+
+![Plugin Installed](docs/images/cursor-plugin-installed.png)
 
 See the [plugin README](./plugins/42crunch-api-security-testing/README.md) for full documentation and [RECIPES.md](./plugins/42crunch-api-security-testing/RECIPES.md) for common scenario guides.
 

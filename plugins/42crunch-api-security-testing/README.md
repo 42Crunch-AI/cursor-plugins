@@ -31,15 +31,32 @@ The `42c-ast` binary is downloaded and kept up to date automatically on first us
 
 Add the 42Crunch marketplace:
 
+1. In terminal/command prompt, type `agent` and press **Enter** to run the Cursor CLI agent.
+
+2. Add the 42Crunch Marketplace:
 ```
-agent plugin marketplace add https://github.com/42Crunch-AI/cursor-plugins
+/plugin marketplace add https://github.com/42Crunch-AI/cursor-plugins
 ```
 
 Install the `42crunch-api-security-testing` plugin:
 
-```
-agent plugin install 42crunch-api-security-testing@42crunch-marketplace
-```
+1. In terminal/command prompt, type `agent` and press **Enter** to run the Cursor CLI agent.
+
+2. Type `/plugin` to open the plugin manager.
+
+3. Navigate to **Marketplace** using the right-arrow key and search for the 42Crunch plugin:
+  - Type '42crunch' in the search bar
+  - Press **Enter** to select the 42Crunch API Security Testing plugin
+
+![Plugin Search](../../docs/images/cursor-plugin-search.png)
+
+5. Select the scope of installation:
+
+![Plugin Scope](../../docs/images/cursor-plugin-scope.png)
+
+6. Press **Enter** to install:
+
+![Plugin Installed](../../docs/images/cursor-plugin-installed.png)
 
 ## Quick Start
 
