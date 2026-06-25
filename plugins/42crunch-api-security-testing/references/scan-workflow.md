@@ -46,7 +46,16 @@ Walk upward from `GIT_ROOT` looking for `.42c/conf.yaml`.
 
 ### 1b — Check for existing scan config
 
-Check whether `.42c/scan/<alias>/scanconf.json` exists.
+> **Scan config source — mandatory**
+>
+> Resolve scan config from the **filesystem only**. Never use git (or any VCS)
+> to locate, restore, or reconstruct a config:
+> - Do **not** run `git show`, `git log`, `git checkout`, or similar to read
+>   `.42c/scan/<alias>/scanconf.json` from history.
+> - If the on-disk file is **missing**, always run `scan conf generate` (Step 1b
+>   below). Never backfill from version control.
+
+Check whether `.42c/scan/<alias>/scanconf.json` exists **on disk**.
 
 **If it exists:**
 - Validate it:
