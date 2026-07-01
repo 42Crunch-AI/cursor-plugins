@@ -1,7 +1,7 @@
 {
   "name": "42crunch-api-security-testing",
   "displayName": "42Crunch API Security Testing",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Catch API security issues during development: audit, scan, remediate, validate with AI guardrails in Cursor.",
   "author": {
     "name": "42Crunch",
