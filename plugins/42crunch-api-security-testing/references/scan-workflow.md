@@ -2,16 +2,18 @@
 
 > **Command conventions used throughout this file**
 > - `<binary>` — the full path resolved during binary discovery (e.g. `~/.42crunch/bin/42c-ast`). Never call `42c-ast` by name alone unless it is confirmed to be on PATH.
-> - **Platform mode**: prefix every command with `API_KEY="<resolved-value>" PLATFORM_HOST="<value>"` (both values read from `~/.42crunch/conf/env` on macOS/Linux or `%APPDATA%\42Crunch\conf\env` on Windows).
-> - **Free Trial mode**: add `--freemium-host stateless.42crunch.com:443` and `--token <TRIAL_TOKEN>` to every command.
+> - **Never write a literal credential value into a command.** Load credentials from the conf file into the environment first, then let the command inherit them — the raw value must never appear in a command string, tool output, or chat message.
+> - **Platform mode**: before every command, load credentials — macOS/Linux: `set -a; . "$HOME/.42crunch/conf/env"; set +a`; Windows: `Get-Content "$env:APPDATA\42Crunch\conf\env" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') } }`. The command then inherits `API_KEY`/`PLATFORM_HOST` — no explicit prefix needed.
+> - **Token mode**: load `TRIAL_TOKEN` the same way, then add `--freemium-host stateless.42crunch.com:443` and `--token "$TRIAL_TOKEN"` (macOS/Linux) or `--token $env:TRIAL_TOKEN` (Windows) to every command — never the literal token.
+> - **OAS analysis is done once, in the calling skill.** The skill's scan-preview step already extracted the operation count, auth scheme types, BOLA/BFLA candidates, and sample-data presence. Reuse those results throughout Steps 2–5 — do not re-read the OAS to re-derive facts already established this conversation. Open the OAS only to look up detail not yet extracted (e.g. a specific operation's schema or examples).
 > - **PowerShell string quoting**: when a variable is immediately followed by `:` inside a double-quoted string, PowerShell parses `$varName:` as a PSDrive reference (like `$env:TEMP`) and throws `InvalidVariableReferenceWithDrive`. Always use `${varName}` to delimit the name — e.g. `"${opName}: ..."` not `"$opName: ..."`. This applies to any inline PowerShell generated during the session, not just the static snippets below.
 
 ---
 
 ## Step 1 — Locate or Create Scan Config
 
-> **Free Trial mode**: omit `--tag` and `--report-sqg` from all commands in this step.
-> These flags require platform access and must not be used in free trial mode.
+> **Token mode**: omit `--tag` and `--report-sqg` from all commands in this step.
+> These flags require platform access and must not be used in token mode.
 
 ### 1a — Resolve git root and alias
 
@@ -58,47 +60,47 @@ Walk upward from `GIT_ROOT` looking for `.42c/conf.yaml`.
 Check whether `.42c/scan/<alias>/scanconf.json` exists **on disk**.
 
 **If it exists:**
-- Validate it:
-  ```bash
-  # Platform mode
-  API_KEY="<value>" PLATFORM_HOST="<value>" <binary> scan conf validate <relative-oas-path> \
-    --conf-file .42c/scan/<alias>/scanconf.json
+- Store `CONF_FILE=.42c/scan/<alias>/scanconf.json` and proceed directly to
+  Step 1c. Do **not** validate it here — Step 1c writes the target URL first
+  and then runs a single validation checkpoint that covers both the existing
+  content and the URL write. Validating twice (before and after the URL write)
+  is a wasted network call.
 
-  # Free Trial mode
-  <binary> scan conf validate <relative-oas-path> \
-    --freemium-host stateless.42crunch.com:443 \
-    --token <TRIAL_TOKEN> \
-    --conf-file .42c/scan/<alias>/scanconf.json
-  ```
-- If valid (`statusCode: 0`): store `CONF_FILE=.42c/scan/<alias>/scanconf.json` and proceed to Step 2.
-- If invalid: treat as missing (re-generate).
-
-**If it does not exist (or was invalid):**
+**If it does not exist (or Step 1c's checkpoint found an existing config invalid):**
 - Ensure the output directory exists:
   ```bash
   mkdir -p .42c/scan/<alias>
   ```
 - Generate a baseline config using the **relative OAS path** (not alias, not absolute path).
-  Platform mode: include `--tag` only when a tag was resolved. Free Trial mode: omit `--tag`.
+  Platform mode: include `--tag` only when a tag was resolved. Token mode: omit `--tag`.
   ```bash
   # Platform mode
-  API_KEY="<value>" PLATFORM_HOST="<value>" <binary> scan conf generate \
+  set -a; . "$HOME/.42crunch/conf/env"; set +a
+  <binary> scan conf generate \
     --output-format json \
     --output .42c/scan/<alias>/scanconf.json \
     [--tag <category>:<tag>] \
     <relative-oas-path>
 
-  # Free Trial mode
+  # Token mode
+  set -a; . "$HOME/.42crunch/conf/env"; set +a
   <binary> scan conf generate \
     --freemium-host stateless.42crunch.com:443 \
-    --token <TRIAL_TOKEN> \
+    --token "$TRIAL_TOKEN" \
     --output-format json \
     --output .42c/scan/<alias>/scanconf.json \
     <relative-oas-path>
   ```
-- Validate (use the same mode-appropriate command as above).
-- If valid: store `CONF_FILE=.42c/scan/<alias>/scanconf.json` and proceed to Step 2.
-- If invalid: surface the error to the user and stop.
+- Check the generate result — this may be the first `42c-ast` call this run
+  makes:
+  - **`statusCode: 3` and `statusMessage: limits_reached`** (Token mode
+    only) → follow `./token-limit.md` now. Do not proceed.
+  - **Any other non-zero** → surface the error to the user and stop.
+  - **`statusCode: 0`** → store `CONF_FILE=.42c/scan/<alias>/scanconf.json`,
+    apply the normalization below, then proceed to Step 1c. Do **not** run a
+    standalone validate here — the config is edited again in Step 1c
+    (normalization + target URL) and validated there once; validating the raw
+    generated output first is a wasted network call.
 
 **Scan Configuration Normalization after first generation (required):**
 - On first `scan conf generate`, the generated `environments.default.variables`
@@ -149,63 +151,128 @@ Important schema rule for `environments.default.variables`:
   }
   ```
 
-After writing `SCAN_TARGET_URL` (and after any direct edits to `CONF_FILE`),
-run an immediate config validation checkpoint before proceeding.
+After writing `SCAN_TARGET_URL` (and any other Step 1 edits — normalization,
+etc.), run the **single Step 1 validation checkpoint**:
 
 ```bash
 # Platform mode
-API_KEY="<value>" PLATFORM_HOST="<value>" <binary> scan conf validate <relative-oas-path> \
+set -a; . "$HOME/.42crunch/conf/env"; set +a
+<binary> scan conf validate <relative-oas-path> \
   --conf-file <CONF_FILE>
 
-# Free Trial mode
+# Token mode
+set -a; . "$HOME/.42crunch/conf/env"; set +a
 <binary> scan conf validate <relative-oas-path> \
   --freemium-host stateless.42crunch.com:443 \
-  --token <TRIAL_TOKEN> \
+  --token "$TRIAL_TOKEN" \
   --conf-file <CONF_FILE>
 ```
 
-If validation fails, stop and fix the config before Step 2.
+Check the status object — this may be the first `42c-ast` call this run makes,
+so check for a token-plan limit rather than assuming a failure means an invalid
+config:
+
+- **`statusCode: 0`** → proceed to Step 2.
+- **`statusCode: 3` and `statusMessage: limits_reached`** (Token mode
+  only) → the token plan has hit its usage limit. Follow `./token-limit.md` now.
+  Do not treat this as an invalid config, do not attempt to regenerate.
+- **Any other non-zero:**
+  - If `CONF_FILE` was an **existing** config found in Step 1b → treat it as
+    invalid: regenerate via Step 1b's generate branch, then repeat Step 1c
+    (write the URL, validate once).
+  - If it was **freshly generated** this run → surface the error to the user
+    and stop.
 
 ---
 
 ## Step 2 — Authentication Setup
 
-Read the OAS `securitySchemes` and global/operation `security` definitions to
-determine the auth scheme, then collect credentials using the per-scheme flows
-below. Every credential field is collected via `AskQuestion` — never
-generate, guess, or suggest credential values.
+Use the auth scheme types already identified in the skill's preview analysis
+(read `securitySchemes` from the OAS only if the preview result is not in
+context), then collect credentials using the per-scheme flows below. Every
+credential field is collected via `AskQuestion` — never generate, guess,
+or suggest credential values.
 
 **BOLA/BFLA second-user identification (do this before collecting any credentials):**
-Identify all BOLA/BFLA candidates in the OAS. Flag every operation where ALL
-of the following are true:
-- The path contains at least one path parameter whose name ends in `Id`, `Key`,
-  or `Ref` (e.g. `{userId}`, `{orderId}`, `{documentRef}`), or is a UUID/integer
-  field whose name matches a resource type — indicating a specific resource
-  instance, not a collection.
-- The HTTP method is GET, PUT, PATCH, or DELETE (i.e. the operation reads or
-  mutates a specific resource instance, not a collection).
+Reuse the BOLA/BFLA candidate list from the skill's preview analysis if it is
+in context. Otherwise flag every operation that acts on a **specific existing
+resource instance named by a client-supplied object reference** — an id / key /
+ref to a resource that some *other* request created. The reference can sit in
+any of three locations; check all of them, not just the path:
 
-HTTP method does NOT gate BOLA candidacy — a PUT or PATCH on `/{resourceId}`
-is just as much a BOLA candidate as a DELETE or GET on the same path.
+- **Path parameter** — name ends in `Id`, `Key`, or `Ref`, or is a UUID/integer
+  named after a resource (`GET /orders/{orderId}`, `DELETE /users/{userId}`).
+- **Query parameter** — the same shape carried in the query string
+  (`GET /search?orderId=…`, `GET /documents?ref=…`).
+- **Request-body field** — a field that references an existing object rather
+  than populating a new one (`POST /lookup {orderId}`, `POST /transfer
+  {fromAccountId, toAccountId}`, `POST /orders/{id}/share {targetUserId}`). A
+  body carrying **multiple** references (e.g. a transfer) is a BOLA candidate on
+  **each** reference.
 
-Flag privileged operations (admin-only actions) separately as BFLA candidates
-even if they have no path ID parameter. Use these heuristics to detect them
-automatically; fall back to asking the user if none match:
+HTTP method does NOT gate candidacy: a `POST` whose body names an existing
+resource (a lookup, transfer, share, or action-on-object call) is as much a
+BOLA candidate as a `GET` / `PUT` / `PATCH` / `DELETE` on `/{resourceId}`. What
+*excludes* an operation is the absence of any reference to an existing instance
+— a pure collection `GET /orders` (list), or a `POST /orders` that only creates
+a new resource from attributes it is given (`{item}`, `{name}`) without
+referencing another object. This location-agnostic swap has been verified
+end-to-end: the scanner seeds the resource as User 1 and replays the operation
+under User 2's token regardless of whether the id sits in the path, query, or
+body.
 
+Flag privileged operations (admin-only or elevated-privilege actions) separately
+as BFLA candidates, even if they have no path ID parameter. **Recall matters
+more than precision here:** a missed candidate means BFLA is silently never
+tested for that operation, while an over-flagged one costs only one extra
+confirmation and admin-credential prompt. So flag on *any* of the signals below
+— and the most dangerous real-world BFLA is an admin-only action on a
+**normal-looking path with no explicit marker** (e.g. `DELETE /users/{id}`,
+`POST /orders/{id}/refund`), so do not rely on the name-based signals alone.
+
+**Explicit markers** (name/tag/scheme):
 - Path segment contains `admin`, `internal`, `management`, `staff`, `system`,
   or `superuser` (e.g. `/admin/users`, `/internal/reports`).
 - Operation is in a tag group named `Admin`, `Internal`, `Management`, or similar.
-- `security` requirement on the operation references a scheme whose name includes
-  `admin` or `superuser`.
-- Request body or parameter has a field whose enum or description restricts it to
-  admin use (e.g. `role: admin`).
-- If none of the above match and the OAS provides no clear signals, call
-  `AskQuestion`: `"I couldn't automatically detect any privileged operations.
-  Are there any admin-only or elevated-privilege endpoints I should test for
-  BFLA?"` — options: `["Yes — I'll flag them", "No — skip BFLA testing"]`.
+- `operationId` or `summary`/`description` implies privilege — e.g. `banUser`,
+  `promoteUser`, `impersonate`, `forceDelete`, `refund`, `approve`, or prose like
+  "admin only", "administrators", "elevated", "restricted", "internal use".
 
-This determines whether a second user (User 2) is needed before credential
-prompts are shown, so the user understands why they're being asked for two sets.
+**Structural signals** (catch the unmarked cases):
+- **Elevated security requirement** — the operation's `security` requires a
+  scheme, OAuth2 scope, or role the *baseline* operations don't (e.g. most
+  operations need scope `read`/`write` but this one needs `admin`/`manage`, or
+  an extra scheme). A per-operation `security` that differs from the API default
+  is a strong privilege signal.
+- **Cross-subject management** — a state-changing operation (POST/PUT/PATCH/DELETE)
+  that acts on an **arbitrary** user/tenant/resource identified in the path
+  (`/users/{id}`, `/accounts/{id}/status`) rather than the caller's own
+  (`/users/me`, `/profile`). Managing *another* subject's record is typically an
+  admin function.
+- **Sensitive action shape** — role/permission changes, account enable/disable/ban,
+  refunds/adjustments, config/settings/feature-flag writes, bulk or system
+  operations, or a request field constrained to privileged values (e.g.
+  `role: admin`, `isAdmin: true`).
+
+Compile the candidate list from all signals, then **confirm it with the user**
+rather than only asking when nothing matched — call `AskQuestion`:
+`"These operations look like they may require elevated privilege, so I'll test
+them for BFLA (function-level authorization): <list>. Should I test all of them,
+and are there any privileged operations I missed?"` — options: `["Test these —
+list looks right", "Let me add or remove some", "None of these are privileged —
+skip BFLA"]`. If the list is empty, still ask: `"I couldn't identify privileged
+operations automatically. Are there any admin-only or elevated-privilege
+endpoints I should test for BFLA?"` — options: `["Yes — I'll flag them", "No —
+skip BFLA testing"]`.
+
+Any confirmed BFLA candidate means an **admin / elevated-privilege credential is
+required** — a distinct identity from the BOLA User 2. Collect it in the
+credential step below (`{{adminUsername}}` / `{{adminPassword}}` or an admin
+token), pin each candidate's happy path to the admin credential, and wire the
+BFLA test (see Step 6). If the user skips BFLA, collect no admin credential and
+wire no BFLA test. Detecting BOLA and BFLA candidates up front is what
+determines how many identities the user is asked for (User 1 always; User 2 for
+BOLA; an admin for BFLA), so the credential prompts don't come as a surprise.
 
 ### Per-scheme credential collection
 
@@ -222,13 +289,15 @@ For each auth scheme, collect credentials conversationally in chat — never gen
 
 Announce which endpoint will be used. Then collect credentials in sequence, grouped by user:
 
-- **No BOLA found** — ask for User 1:
-  - "What is User 1's username or email?" → store as `{{username}}`
-  - "What is User 1's password or PIN?" → store as `{{password}}`
+- **No BOLA found** — use 2 questions:
+  - `header: "User 1"`, question: `"What is User 1's username or email?"`  → store as `{{username}}`
+  - `header: "User 1"`, question: `"What is User 1's password or PIN?"`    → store as `{{password}}`
 
-- **BOLA found** — ask for User 1, then User 2:
-  - User 1: username/email → `{{username}}`, password/PIN → `{{password}}`
-  - User 2: username/email (must NOT share User 1's resources) → `{{user2Username}}`, password/PIN → `{{user2Password}}`
+- **BOLA found** — use 4 questions (all in the same call):
+  - `header: "User 1"`, question: `"What is User 1's username or email?"`                                       → store as `{{username}}`
+  - `header: "User 1"`, question: `"What is User 1's password or PIN?"`                                        → store as `{{password}}`
+  - `header: "User 2"`, question: `"What is User 2's username or email? (must NOT share User 1's resources)"`  → store as `{{user2Username}}`
+  - `header: "User 2"`, question: `"What is User 2's password or PIN?"`                                        → store as `{{user2Password}}`
 
 For BFLA (admin) credentials, ask separately after the BOLA pair — collect `{{adminUsername}}` and `{{adminPassword}}` under an "Admin" heading in chat.
 
@@ -249,51 +318,24 @@ Do not proceed until at least the primary user's credentials are confirmed.
 
 ### Writing credential acquisition flows into `authenticationDetails`
 
-When a credential requires a request sequence (e.g. a login call) to acquire its token,
-add a `requests` array to the credential object.
+**Read `./scanconf-templates.md` now if it is not already in context** — it is
+the canonical library for every scanconf JSON shape used in Steps 2–6
+(credential acquisition, operation patterns, dependency chains, authorization
+tests). Never re-read it once loaded, and never invent a shape it already
+defines.
+
+When a credential requires a request sequence (e.g. a login call) to acquire
+its token, add a `requests` array to the credential object using the
+**`authenticationDetails` — bearer token** pattern from the templates file.
+`<LoginOperationId>` is the `operationId` of the operation that issues the
+token (look for a `POST /login`, `POST /auth/token`, or equivalent);
+`<tokenField>` is the JSON Pointer path to the token value in the response
+body.
 
 **Rule: always use `$ref` to reference an existing operation — never inline `request` objects.**
 Inline blocks have no `operationId`, which the VS Code extension rejects with
 `Unable to parse request that has no operationId set`. The `42c-ast` CLI accepts both
 formats, but the extension does not — always use `$ref` regardless.
-
-**Pattern:**
-```json
-"authenticationDetails": [
-  {
-    "<SchemeName>": {
-      "type": "<bearer|oauth2|basic|apiKey>",
-      "default": "<CredentialName>",
-      "credentials": {
-        "<CredentialName>": {
-          "description": "<description>",
-          "credential": "{{<tokenVar>}}",
-          "requests": [
-            {
-              "$ref": "#/operations/<LoginOperationId>/request",
-              "responses": {
-                "200": {
-                  "expectations": { "httpStatus": 200 },
-                  "variableAssignments": {
-                    "<tokenVar>": {
-                      "in": "body", "from": "response", "contentType": "json",
-                      "path": { "type": "jsonPointer", "value": "/<tokenField>" }
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        }
-      }
-    }
-  }
-]
-```
-
-Replace `<LoginOperationId>` with the `operationId` of the operation that issues the
-token (look for a `POST /login`, `POST /auth/token`, or equivalent). Replace
-`<tokenField>` with the JSON Pointer path to the token value in the response body.
 
 **Variable scoping — credential context only:**
 `variableAssignments` in a credential acquisition step are scoped to the credential
@@ -303,7 +345,7 @@ available in the operation context at scan time. Any extra variables captured he
 **Rule:** capture only the credential (for example Bearer token, API key, or Basic Auth) 
 in `authenticationDetails`. For any other data needed from the login response, 
 add an explicit `before` block on each operation that needs it and capture the value
-there instead (See Step 6 — Class-B: dependency chain pattern).
+there instead (see Step 6 and the Class-B patterns in `./scanconf-templates.md`).
   - If many operations share the same variable, use the global 
     before block (see Step 6 — Global `before` block). Do not rely on
     variableAssignments in `authenticationDetails` for anything beyond the
@@ -315,33 +357,10 @@ credential in `authenticationDetails` as User 1. Populate or adjust that
 credential's `credential`, `requests`, and `variableAssignments` fields as
 needed instead of creating a second User 1 credential entry.
 
-**Second user (BOLA):** use `environment` to override the credential variables for that
-step without duplicating the operation:
-```json
-"<SecondCredentialName>": {
-  "credential": "{{<secondTokenVar>}}",
-  "requests": [
-    {
-      "$ref": "#/operations/<LoginOperationId>/request",
-      "environment": {
-        "<usernameVar>": "{{<user2UsernameVar>}}",
-        "<passwordVar>": "{{<user2PasswordVar>}}"
-      },
-      "responses": {
-        "200": {
-          "expectations": { "httpStatus": 200 },
-          "variableAssignments": {
-            "<secondTokenVar>": {
-              "in": "body", "from": "response", "contentType": "json",
-              "path": { "type": "jsonPointer", "value": "/<tokenField>" }
-            }
-          }
-        }
-      }
-    }
-  ]
-}
-```
+**Second user (BOLA) / Admin (BFLA):** use a step-level `environment` override
+on the same login `$ref` to swap credential variables without duplicating the
+operation — the `User2Token` / `AdminToken` entries in the templates'
+`authenticationDetails` pattern show the exact shape.
 
 `environment` overrides apply only to that single step. The keys must match the template
 variable names used in the referenced operation's `requestBody`. If the login operation
@@ -354,8 +373,10 @@ template variables first — otherwise `environment` overrides have no effect.
 
 Before classifying operations, establish the source of test data for the scan.
 
-**Check the OAS for existing sample data**: scan all operation request bodies and
-parameters for `example`, `examples`, or `default` values on their schemas.
+**Sample-data presence was already determined in the skill's preview analysis**
+— reuse that result. Only re-scan the OAS (request bodies and parameters for
+`example` / `examples` / `default` values) if the preview result is not in
+context.
 
 Call `AskQuestion`:
 
@@ -450,7 +471,9 @@ Keep these available when classifying operations in Step 5 — Class-A operation
 ## Step 5 — Operation Classification
 
 Before writing any scenario into the scan config, analyse every operation in
-the OAS and classify it. Before presenting the table, give the user a brief
+the OAS and classify it. The `BOLA?` column reuses the candidate list already
+established in Step 2 (which itself came from the skill's preview analysis) —
+do not re-derive it here. Before presenting the table, give the user a brief
 explanation of the four classes so they can meaningfully validate the results.
 
 This step is mandatory and visible: do not treat the classification as an
@@ -488,18 +511,21 @@ satisfied from:
 - The `{{$randomuint}}` / `{{$randomstring}}` macros for uniqueness
 
 **B — Dependency-chain required**
-One or more path or query params contain a dynamic ID that can only come from
-a prior operation's response body (e.g. `{orderId}`, `{userId}`, `{documentId}`).
+One or more inputs contain a dynamic ID that can only come from a prior
+operation's response body (e.g. `{orderId}`, `{userId}`, `{documentId}`). The ID
+can be consumed from a **path** parameter, a **query** parameter, or a
+**request-body field** — all three are dependency-chain inputs.
 
 Detection heuristic:
-1. Identify path params that look like resource IDs (end in `Id`, `Key`, `Ref`,
-   or are a UUID/integer field named after a resource).
+1. Identify resource-ID inputs in any location — path params, query params, or
+   body fields that reference an existing object (end in `Id`, `Key`, `Ref`, or
+   are a UUID/integer named after a resource).
 2. Find the operation that creates or returns that resource (typically a `POST`
    or `GET` on the parent collection path).
 3. Find the response body field in that operation's success schema that provides
    the ID value.
-4. Propose the chain: `<CreatorOp> → <TargetOp>` with the JSON Pointer to
-   extract the variable.
+4. Propose the chain: `<CreatorOp> → <TargetOp>`, noting where the ID is consumed
+   (path / query / body) and the JSON Pointer to extract it.
 
 **C — User-data-required**
 Inputs cannot be resolved automatically and no plausible creator operation
@@ -550,8 +576,10 @@ Operation              | Class  | BOLA? | Proposed data source
 UserLogin              | A      | no    | env vars: {{username}} / {{password}}
 UserRegistration       | A      | no    | {{$randomuint}} macro for username/email
 CreateResource         | A      | no    | OAS body example + {{userId}} from auth
-RetrieveResource       | B      | yes   | CreateResource → /{resourceId} (`before` block)
-UpdateResource         | B      | yes   | CreateResource → /{resourceId} (`before` block)
+RetrieveResource       | B      | yes   | CreateResource → /{resourceId} in path (`before` block)
+UpdateResource         | B      | yes   | CreateResource → /{resourceId} in path (`before` block)
+LookupResource         | B      | yes   | CreateResource → resourceId in body (`before` block)
+SearchResource         | B      | yes   | CreateResource → ?resourceId= in query (`before` block)
 DeleteResource         | B      | yes   | CreateResource → /{resourceId} (creator in scenario, not `before`)
 DeleteUser             | B      | yes   | UserRegistration → /{userId} (`before` block)
 DeleteAccount          | D      | no    | register+login throwaway → delete throwaway
@@ -567,23 +595,52 @@ Output the classification explanation and table above as a chat message, then ca
 
 ## Step 6 — Build Scenario Chains
 
+All JSON shapes for this step live in `./scanconf-templates.md` (the canonical
+pattern library) — read it now if it is not already in context. This step
+decides *which* pattern applies *where*; the templates file defines the exact
+JSON for each named pattern.
+
 For every Class-B operation, wire a creator step that seeds the resource ID
 before the target request runs. Show the user each proposed chain in plain
 English before writing it.
 
-**Where the creator step goes depends on the target HTTP method:**
+**Where the creator step goes depends on whether the happy path consumes the
+seeded resource:**
 
-| Target method | Creator placement | Why |
-|---------------|-------------------|-----|
-| GET, PUT, PATCH | Operation-level `before` block + single-step `happy.path` scenario | Resource must exist but is not destroyed by the happy path |
-| DELETE | First request inside `happy.path` `requests[]`, **not** in `before` | See **DELETE Class-B operations** below |
+| Target operation | Creator placement | Pattern in `scanconf-templates.md` |
+|------------------|-------------------|-------------------------------------|
+| Non-destructive (GET, PUT, PATCH, or a body/query reader such as `POST /lookup`) | Operation-level `before` block + single-step `happy.path` scenario | **Class-B — dependency chain, GET / PUT / PATCH** |
+| Destructive (DELETE, or any operation whose happy path removes/consumes the seeded resource) | First request inside `happy.path` `requests[]`, **not** in `before` | **Class-B — dependency chain, DELETE** |
+
+**Why destructive targets differ:** BOLA replays `happy.path` with User 2's
+credential on the target step; a creator that lives only in `before` may not
+re-seed the resource before the replay, so the test returns 404 instead of
+401/403 — a false BOLA failure. The full rationale, replay flow, and
+symptom-to-watch-for are documented with the DELETE pattern in the templates
+file. (Non-destructive targets are safe in `before` because the seeded resource
+survives to the replay — verified: the User 2 replay reads a resource seeded on
+an earlier User 1 run.)
+
+**Where the seeded ID is wired into the target request depends on the reference
+location** (from the Step 5 classification):
+
+| Reference location | Wire the `{{resourceId}}` variable into |
+|--------------------|------------------------------------------|
+| Path parameter  | the target request's `paths[]` array |
+| Query parameter | the target request's `queries[]` array |
+| Request-body field | the target request's `requestBody.json` (or matching body mode) |
+
+The creator/`before` wiring and the BOLA test definition are identical across
+all three — only the target request field that consumes the id changes.
 
 Do not consider a Class-B operation fully configured unless the creator step
 reliably seeds the resource and extracts the required identifier (`variableAssignments`
 on the creator's success response, or on the creator operation definition that
 the `$ref` inherits). A BOLA authorization test alone is not a substitute for a
 dependency chain, and a static placeholder path value is not sufficient when a
-resource must be created or resolved first.
+resource must be created or resolved first. If no existing operation can
+reliably create or return the needed resource ID, stop and ask the user for
+the missing seed data or an alternate creator operation.
 
 #### `before` block rules:
 1. Always prefer to reference existing OAS operations in `before` blocks — avoid creating
@@ -600,114 +657,8 @@ globally via `environments.default.variables`, global static defaults, or a
 global `before` assignment. Do not rely on values supplied only in another
 scenario.
 
-#### DELETE Class-B operations — creator inside the scenario
-
-When the Class-B **target operation is DELETE** and the happy path scenario is
-the delete step itself (especially when `BOLA? = yes`), put the creator
-operation as the **first request** in `scenarios[].requests[]`, immediately
-before the delete `$ref`. **Do not** put the creator only in the operation-level
-`before` block with a single-step delete scenario.
-
-**Why:** BOLA replays the operation's `happy.path` scenario with User 2's
-credential swapped onto the delete step. If User 1's happy path already deleted
-the resource — or the creator in `before` does not reliably re-seed the resource
-before the BOLA replay — the authorization test can return **404 Not Found**
-instead of the expected **401/403**. That produces a false BOLA failure even
-when the API correctly enforces ownership.
-
-**Expected BOLA replay flow (DELETE):**
-1. Creator step runs as User 1 → sets `{{resourceId}}` (or equivalent)
-2. Delete step runs as User 2 → API returns **403** if ownership is enforced
-   (**not** a finding)
-
-**Symptom to watch for in scan output:** `authentication-swapping-bola` failure
-with HTTP **404** and a message like "not found" on a DELETE — restructure the
-chain to scenario-inline creator before re-testing.
-
-### Class-B: dependency chain pattern (GET / PUT / PATCH)
-
-```json
-"<OperationId>": {
-  "operationId": "<OperationId>",
-  "request": { ... },
-  "before": [
-    {
-      "$ref": "#/operations/<CreatorOperationId>/request",
-      "environment": {
-        "<creatorVar1>": "<value1>",
-        "<creatorVar2>": "<value2>"
-      },
-      "responses": {
-        "<successCode>": {
-          "expectations": { "httpStatus": <successCode> },
-          "variableAssignments": {
-            "<varName>": {
-              "in": "body",
-              "from": "response",
-              "contentType": "json",
-              "path": { "type": "jsonPointer", "value": "/<fieldName>" }
-            }
-          }
-        }
-      }
-    }
-  ],
-  "scenarios": [
-    {
-      "key": "happy.path",
-      "requests": [
-        {
-          "fuzzing": true,
-          "$ref": "#/operations/<OperationId>/request"
-        }
-      ],
-      "fuzzing": true
-    }
-  ]
-}
-```
-
-### Class-B: dependency chain pattern (DELETE)
-
-Use this shape when the target operation is DELETE and `BOLA? = yes` (or any
-Class-B delete where the happy path destroys the resource):
-
-```json
-"<DeleteOperationId>": {
-  "operationId": "<DeleteOperationId>",
-  "request": { ... },
-  "scenarios": [
-    {
-      "key": "happy.path",
-      "fuzzing": true,
-      "requests": [
-        {
-          "$ref": "#/operations/<CreatorOperationId>/request",
-          "environment": {
-            "<creatorVar1>": "<value1>"
-          }
-        },
-        {
-          "fuzzing": true,
-          "$ref": "#/operations/<DeleteOperationId>/request"
-        }
-      ]
-    }
-  ],
-  "authorizationTests": ["<BolaTestName>"]
-}
-```
-
-Do **not** add an operation-level `before` block for this pattern — the creator
-belongs in the scenario so BOLA replay seeds a live resource before the swapped
-delete runs.
-
-If no existing operation can reliably create or return the needed resource ID,
-stop and ask the user for the missing seed data or an alternate creator
-operation.
-
-The `<varName>` captured from the creator's response is then referenced as
-`{{varName}}` in the target operation's `paths` or `queries` array.
+Apply the matching Class-B pattern from `./scanconf-templates.md` to every
+Class-B operation.
 
 Before running Step 8, verify each Class-B chain is self-contained:
 - **GET/PUT/PATCH:** every `before` step resolves creator input variables in its
@@ -720,37 +671,11 @@ Before running Step 8, verify each Class-B chain is self-contained:
 ### Global `before` block
 
 If multiple operations share the same dependency variable (e.g. many operations
-need `customerId` from a login call), add the creator to the global `before`
-block rather than repeating it in every scenario:
-
-```json
-"before": [
-  {
-    "$ref": "#/operations/<AuthOp>/request",
-    "responses": {
-      "200": {
-        "expectations": { "httpStatus": 200 },
-        "variableAssignments": {
-          "customerId": {
-            "in": "body", "from": "response", "contentType": "json",
-            "path": { "type": "jsonPointer", "value": "/user/customerId" }
-          }
-        }
-      }
-    }
-  }
-]
-```
-
-> **Do NOT use the global `before` block to register or provision test users**
-> The scan assumes all test users (User 1, User 2, Admin) already exist in
-> the database before the scan starts. User provisioning is an operational
-> prerequisite — it is not something the scan config manages. The global
-> `before` is for creating shared resources, or extracting shared
-> runtime variables that multiple operations need during the scan (e.g. a
-> resource ID or session value returned by a setup call). If you need a fresh
-> user per-iteration for a specific operation, use the Class-D throwaway-user
-> pattern on that operation's own `before` block instead.
+need `customerId` from a login call), use the **Global `before` block** pattern
+from `./scanconf-templates.md` rather than repeating the creator in every
+scenario. **Never use the global `before` to register or provision test
+users** — the scan assumes User 1, User 2, and Admin already exist before it
+starts; see the warning attached to that pattern.
 
 ### Class-C: user-provided data
 
@@ -761,221 +686,61 @@ block. If the operation is not in the table, ask the user to paste the values.
 
 ### Class-D: throwaway-user pattern
 
-For operations that delete the primary user's own account, the throwaway
-credential must be fully defined in `authenticationDetails` and the operation
-must reference it directly. The operation's `before` block registers the
-throwaway user before each iteration, so the scenario only needs to delete it.
+For operations that delete the primary user's own account, apply the
+**Class-D — throwaway user** pattern from `./scanconf-templates.md` in full.
+Four elements are all mandatory:
 
-**Step A — Add the register step to the operation's `before` block**
+1. **Register step in the operation's `before` block** — so the throwaway user
+   exists before each scenario iteration; accept both 201 (created) and 409
+   (already exists — idempotent).
+2. **Named throwaway credential in `authenticationDetails`** — login
+   acquisition step only (see the `<throwaway-credential-name>` entry in the
+   templates' `authenticationDetails` pattern).
+3. **`auth` pinned on the operation definition itself** —
+   `"auth": ["AccessToken/<throwaway-credential-name>"]` on the operation's
+   `request` block, never as a scenario-step override. This guarantees User1
+   is never touched.
+4. **Delete-only 1-step scenario** — do NOT re-register in the scenario; the
+   `before` block already re-registers before every iteration.
 
-Add the register operation to the `before` block of the Class-D operation so
-the throwaway user exists before each scenario iteration. Accept both 201
-(created) and 409 (already exists — idempotent):
+If the register operation rejects existing accounts (no 409 tolerance), add an
+idempotent pre-cleanup utility request per the templates' **`requests` — named
+utility request** section: login as the throwaway → delete any pre-existing
+account → the register step always finds a clean slate.
 
-```json
-"before": [
-  {
-    "$ref": "#/operations/<RegisterOperationId>/request",
-    "environment": {
-      "<emailVar>": "<throwaway@example.com>",
-      "<credentialVar>": "<throwawayCredential>"
-    },
-    "responses": {
-      "201": { "expectations": { "httpStatus": 201 } },
-      "409": { "expectations": { "httpStatus": 409 } }
-    }
-  }
-]
-```
+### BOLA / BFLA authorization test patterns
 
-Then, inside the `AccessToken` credentials map, add a named throwaway entry
-with only the login acquisition step:
+Apply the **`authorizationTests` — BOLA and BFLA** section of
+`./scanconf-templates.md`:
 
-```json
-"<throwaway-credential-name>": {
-  "credential": "{{AccessToken}}",
-  "requests": [
-    {
-      "$ref": "#/operations/<LoginOperationId>/request",
-      "environment": {
-        "<emailVar>": "<throwaway@example.com>",
-        "<credentialVar>": "<throwawayCredential>"
-      },
-      "responses": {
-        "200": {
-          "expectations": { "httpStatus": 200 },
-          "variableAssignments": {
-            "AccessToken": {
-              "in": "body", "from": "response", "contentType": "json",
-              "path": { "type": "jsonPointer", "value": "/<tokenField>" }
-            }
-          }
-        }
-      }
-    }
-  ]
-}
-```
+- **BOLA** — for every operation marked `BOLA? = yes` in the Step 5 table:
+  define the `authentication-swapping-bola` test once at the top level
+  (source `User1Token` → target `User2Token`), then tag each candidate
+  operation's `authorizationTests` array.
+- **BFLA** — for every operation flagged as a BFLA candidate (privileged /
+  admin-only): define the `authentication-swapping-bfla` test once (source
+  `AdminToken` → target `User1Token`), tag each candidate, **and pin the
+  operation's `auth` to the admin credential on its request definition**
+  (mandatory — the baseline happy path must run as admin so the test is a
+  true admin→low-privilege swap).
 
-**Step B — Set `auth` on the operation definition itself**
+No additional scenario block is needed for either test — the scanner replays
+the operation's `happy.path` scenario (including its `before` blocks and all
+`scenarios[].requests[]` steps) with the swapped credential.
 
-Use `Scheme/CredentialName` notation directly on the operation's `request`
-block — not as a scenario-step override:
-
-```json
-"<DeleteSelfOperationId>": {
-  "operationId": "<DeleteSelfOperationId>",
-  "request": {
-    "operationId": "<DeleteSelfOperationId>",
-    "auth": ["AccessToken/<throwaway-credential-name>"],
-    "request": { ... }
-  },
-  ...
-}
-```
-
-**Step C — Build a 1-step scenario: delete only**
-
-The throwaway user is already registered in the operation's `before` block
-(Step A), which runs before every scenario iteration. There is no need to
-re-register after deletion — the `before` block handles that automatically.
-
-```json
-"scenarios": [
-  {
-    "key": "happy.path",
-    "fuzzing": true,
-    "requests": [
-      {
-        "fuzzing": true,
-        "$ref": "#/operations/<DeleteSelfOperationId>/request"
-      }
-    ]
-  }
-]
-```
-
-The operation's `auth` field ensures only the throwaway credential is used —
-User1 is never touched. Before each subsequent iteration, the operation's
-`before` block re-registers the throwaway user so the `authenticationDetails`
-login step can always acquire a fresh token.
-
-**Step D — Add a utility request for idempotent pre-cleanup (optional)**
-
-If the register operation rejects existing accounts (no 409 tolerance), add a
-named utility request to the `requests` section that deletes any pre-existing
-throwaway account, then reference it in the register operation's `before` block:
-
-```json
-"requests": {
-  "<DeleteThrowawayUtil>": {
-    "request": {
-      "type": "42c",
-      "details": {
-        "method": "DELETE",
-        "url": "{{host}}<delete-path>",
-        "headers": [{ "key": "Authorization", "value": "Bearer {{AccessToken}}" }]
-      }
-    },
-    "defaultResponse": "200",
-    "responses": { "200": { "expectations": { "httpStatus": 200 } } }
-  }
-}
-```
-
-Then in the register operation's `before` block: login as the throwaway → call
-`<DeleteThrowawayUtil>` → the register step in the happy path always finds a
-clean slate.
-
-### BOLA authorization test pattern (BOLA? = yes operations)
-
-For every operation marked `BOLA? = yes` in the Step 5 table, register it
-with the top-level `authorizationTests` entry. The scanner replaces the
-source credential with the target credential on an otherwise identical
-execution of the operation's `happy.path` scenario — including any `before`
-blocks on that operation **and** all steps in `scenarios[].requests[]`.
-
-> **DELETE operations:** ensure the creator step is the first request inside
-> `happy.path` (see Step 6 — DELETE Class-B operations). A creator-only `before`
-> block with a single-step delete scenario commonly causes false BOLA failures
-> (404 instead of 403).
-
-**Step 1 — Define the authorization test (once, top-level):**
-
-```json
-"authorizationTests": {
-  "<BolaTestName>": {
-    "key": "authentication-swapping-bola",
-    "source": ["<SchemeName>/User1Token"],
-    "target": ["<SchemeName>/User2Token"]
-  }
-}
-```
-
-**Step 2 — Tag each BOLA candidate operation:**
-
-```json
-"<TargetOperationId>": {
-  "operationId": "<TargetOperationId>",
-  "authorizationTests": ["<BolaTestName>"],
-  ...
-}
-```
-
-No additional scenario block is needed. The scanner runs the BOLA test by
-replaying the operation's `happy.path` scenario using User 2's token.
-
-A 2xx response on the BOLA authorization test is a confirmed BOLA finding.
-A 401 or 403 means the server enforces ownership — not a finding.
-
-### BFLA authorization test pattern (BFLA candidates)
-
-For every operation flagged as a BFLA candidate (privileged / admin-only),
-register it with a BFLA entry in `authorizationTests`. The scanner replaces
-the admin credential with the low-privilege credential on an otherwise
-identical execution of the operation's happy path.
-
-**Mandatory auth pinning for privileged operations:**
-Set the privileged operation's auth to the admin credential on the operation
-request definition itself. This ensures the baseline happy path executes as
-admin and the BFLA test is a true credential swap from admin to low-privilege.
-
-```json
-"<PrivilegedOperationId>": {
-  "operationId": "<PrivilegedOperationId>",
-  "request": {
-    "operationId": "<PrivilegedOperationId>",
-    "auth": ["<SchemeName>/AdminToken"],
-    "request": { ... }
-  },
-  ...
-}
-```
-
-**Step 1 — Define the authorization test (once, top-level):**
-
-```json
-"authorizationTests": {
-  "<BflaTestName>": {
-    "key": "authentication-swapping-bfla",
-    "source": ["<SchemeName>/AdminToken"],
-    "target": ["<SchemeName>/User1Token"]
-  }
-}
-```
-
-**Step 2 — Tag each BFLA candidate operation:**
-
-```json
-"<PrivilegedOperationId>": {
-  "operationId": "<PrivilegedOperationId>",
-  "authorizationTests": ["<BflaTestName>"],
-  ...
-}
-```
-
-No additional scenario block is needed. A 2xx response on the BFLA
-authorization test is a confirmed BFLA finding.
+**Result semantics:** the engine's authorization verdict is **status-only** —
+any 2xx on the swapped request is reported as a finding; 401/403 means the
+server enforces authorization (not a finding). This is correct for
+**state-changing** targets (PUT / PATCH / DELETE, or a POST that mutates the
+resource): a 2xx means the attacker's credential successfully operated on the
+victim's resource. For **read** targets (GET, or a lookup/search that returns
+the object) it can **false-positive** — an owner-scoped endpoint that ignores
+the client-supplied id and returns the *caller's own* data also answers 2xx
+without leaking anything. Confirm read findings by comparing response bodies
+(Step 12a's authorization-confirmation pass) before presenting them. For DELETE,
+also ensure the creator is scenario-inline per the placement table above — a
+creator-only `before` block commonly causes false BOLA failures (404 instead of
+403).
 
 ## Step 7 — Scan Config Validation Checkpoint
 
@@ -983,15 +748,22 @@ After all Step 2 to Step 6 edits are complete (credentials, operation
 classification, scenario chains, and authorization test wiring), validate
 `CONF_FILE` again before running happy-path validation.
 
+**Skip condition:** if Steps 2–6 made **no changes** to `CONF_FILE` since the
+Step 1c checkpoint passed (rare — no auth schemes, no Class-B/C/D operations,
+no authorization tests), skip this checkpoint and go straight to Step 8 —
+re-validating an unchanged file is a wasted network call.
+
 ```bash
 # Platform mode
-API_KEY="<value>" PLATFORM_HOST="<value>" <binary> scan conf validate <relative-oas-path> \
+set -a; . "$HOME/.42crunch/conf/env"; set +a
+<binary> scan conf validate <relative-oas-path> \
   --conf-file <CONF_FILE>
 
-# Free Trial mode
+# Token mode
+set -a; . "$HOME/.42crunch/conf/env"; set +a
 <binary> scan conf validate <relative-oas-path> \
   --freemium-host stateless.42crunch.com:443 \
-  --token <TRIAL_TOKEN> \
+  --token "$TRIAL_TOKEN" \
   --conf-file <CONF_FILE>
 ```
 
@@ -1021,25 +793,28 @@ operations with failing happy paths, producing a cascade of false positives.
 
 ```bash
 # macOS / Linux — Platform mode
-API_KEY="<value>" PLATFORM_HOST="<value>" <binary> scan run --enrich=false \
+set -a; . "$HOME/.42crunch/conf/env"; set +a
+<binary> scan run --enrich=false \
   <relative-oas-path> --conf-file <CONF_FILE> > /tmp/42c-happy-out.json 2>&1
 
-# macOS / Linux — Free Trial mode
+# macOS / Linux — Token mode
+set -a; . "$HOME/.42crunch/conf/env"; set +a
 <binary> scan run --enrich=false <relative-oas-path> \
   --freemium-host stateless.42crunch.com:443 \
-  --token <TRIAL_TOKEN> --conf-file <CONF_FILE> > /tmp/42c-happy-out.json 2>&1
+  --token "$TRIAL_TOKEN" --conf-file <CONF_FILE> > /tmp/42c-happy-out.json 2>&1
 ```
 
 ```powershell
 # Windows — Platform mode
-$env:API_KEY="<value>"; $env:PLATFORM_HOST="<value>"
+Get-Content "$env:APPDATA\42Crunch\conf\env" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') } }
 & <binary> scan run --enrich=false <relative-oas-path> --conf-file <CONF_FILE> `
   > "$env:TEMP\42c-happy-out.json" 2>&1
 
-# Windows — Free Trial mode
+# Windows — Token mode
+Get-Content "$env:APPDATA\42Crunch\conf\env" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') } }
 & <binary> scan run --enrich=false <relative-oas-path> `
   --freemium-host stateless.42crunch.com:443 `
-  --token <TRIAL_TOKEN> --conf-file <CONF_FILE> `
+  --token $env:TRIAL_TOKEN --conf-file <CONF_FILE> `
   > "$env:TEMP\42c-happy-out.json" 2>&1
 ```
 
@@ -1184,25 +959,28 @@ Run the full scan, capturing output to a temp file for extraction:
 
 ```bash
 # macOS / Linux — Platform mode
-API_KEY="<value>" PLATFORM_HOST="<value>" <binary> scan run --enrich=false --report-sqg \
+set -a; . "$HOME/.42crunch/conf/env"; set +a
+<binary> scan run --enrich=false --report-sqg \
   <relative-oas-path> --conf-file <CONF_FILE> > /tmp/42c-scan-out.json 2>&1
 
-# macOS / Linux — Free Trial mode
+# macOS / Linux — Token mode
+set -a; . "$HOME/.42crunch/conf/env"; set +a
 <binary> scan run --enrich=false <relative-oas-path> \
   --freemium-host stateless.42crunch.com:443 \
-  --token <TRIAL_TOKEN> --conf-file <CONF_FILE> > /tmp/42c-scan-out.json 2>&1
+  --token "$TRIAL_TOKEN" --conf-file <CONF_FILE> > /tmp/42c-scan-out.json 2>&1
 ```
 
 ```powershell
 # Windows — Platform mode
-$env:API_KEY="<value>"; $env:PLATFORM_HOST="<value>"
+Get-Content "$env:APPDATA\42Crunch\conf\env" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') } }
 & <binary> scan run --enrich=false --report-sqg <relative-oas-path> --conf-file <CONF_FILE> `
   > "$env:TEMP\42c-scan-out.json" 2>&1
 
-# Windows — Free Trial mode
+# Windows — Token mode
+Get-Content "$env:APPDATA\42Crunch\conf\env" | ForEach-Object { if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') } }
 & <binary> scan run --enrich=false <relative-oas-path> `
   --freemium-host stateless.42crunch.com:443 `
-  --token <TRIAL_TOKEN> --conf-file <CONF_FILE> `
+  --token $env:TRIAL_TOKEN --conf-file <CONF_FILE> `
   > "$env:TEMP\42c-scan-out.json" 2>&1
 ```
 
@@ -1266,7 +1044,13 @@ if isinstance(operations, dict):
     for section_name in ("authorizationRequestsResults", "conformanceRequestsResults", "customRequestsResults"):
       for entry in operation.get(section_name, []) or []:
         outcome = entry.get("outcome") or {}
-        if outcome.get("testSuccessful") is True:
+        # The engine's verdict is outcome.status: "correct" = the API behaved
+        # correctly (e.g. enforced 401/403 on an authorization swap, or accepted
+        # a partial-security scenario). testSuccessful is NOT a reliable
+        # discriminator — it is false even for correctly-enforced endpoints, so
+        # filtering on it alone reports secured endpoints as failures. Skip any
+        # entry the engine marked "correct".
+        if outcome.get("testSuccessful") is True or outcome.get("status") == "correct":
           continue
         test = entry.get("test") or {}
         severity = severity_from_criticality(outcome.get("criticality"))
@@ -1347,7 +1131,11 @@ if ($report -and $report.operations) {
       $entries = $op.$sectionName
       if (-not $entries) { continue }
       foreach ($entry in $entries) {
-        if ($entry.outcome -and $entry.outcome.testSuccessful -eq $true) { continue }
+        # Skip entries the engine marked "correct" (e.g. enforced 401/403 on an
+        # authorization swap). testSuccessful alone is false even for secured
+        # endpoints, so filtering on it reports them as failures. See the Python
+        # note above.
+        if ($entry.outcome -and ($entry.outcome.testSuccessful -eq $true -or $entry.outcome.status -eq 'correct')) { continue }
         $testKey = if ($entry.test -and $entry.test.key) { $entry.test.key } else { '?' }
         $severity = if ($entry.outcome) { Get-SeverityFromCriticality([int]$entry.outcome.criticality) } else { '' }
         $failures += "$opName,$testKey,$severity"
@@ -1402,9 +1190,9 @@ Then proceed to Step 12.
 
 ---
 
-**Free Trial mode**: `sqgPass` will be absent or `true`. Present all findings
+**Token mode**: `sqgPass` will be absent or `true`. Present all findings
 informally — no quality gate is enforced. Note to the user:
-> "In free trial mode the scan shows all findings for your information — there
+> "In token mode the scan shows all findings for your information — there
 > is no automatic quality gate. Authorization failures (red) are real
 > vulnerabilities worth fixing regardless of the gate (OWASP API1/API5).
 > Conformance findings (yellow) document gaps between your OAS contract and
@@ -1423,6 +1211,110 @@ Then ask which (if any) findings the user wants to address.
 
 ## Step 12 — Display Results and Apply Fixes
 
+### 12a-0 — Confirm authorization findings (body-aware)
+
+Confirm each BOLA/BFLA finding the scan reported **before** rendering it. The
+engine's authorization verdict is **status-only** — it flags every 2xx on the
+swapped request — so read endpoints can false-positive: an owner-scoped endpoint
+that ignores the client-supplied id and returns the *caller's own* data also
+answers 2xx without leaking anything. Route each finding by the operation's
+read/write nature **from your Step 5 classification** (not HTTP method alone — a
+`POST` may be a lookup that returns an object, or a mutation):
+
+- **State-changing target** (PUT / PATCH / DELETE, or a POST/other you classified
+  as mutating): a 2xx is **confirmed** — the attacker's credential operated on
+  the victim's resource. The body is irrelevant; skip the comparison.
+- **Read target** (GET, or a POST/other you classified as returning the
+  referenced object): confirm only if the attacker received the **victim's**
+  data. Compare the attacker's response body against the legitimate owner's
+  (User 1 happy-path) body for the same operation — both are in the scan output
+  under `response.rawPayload` (base64 of the raw HTTP response): the owner's
+  under the operation's `scenarios`, the attacker's under
+  `authorizationRequestsResults`.
+
+Surface the evidence for every authorization finding:
+
+```bash
+# macOS / Linux
+python3 << 'EOF'
+import json, re, base64
+d = json.loads(re.search(r'\{[\s\S]*\}', open("/tmp/42c-scan-out.json").read()).group())
+ops = d.get("report", {}).get("operations", {})
+
+def body(b64):
+    if not b64: return None
+    raw = base64.b64decode(b64).decode("utf-8", "replace")
+    parts = re.split(r'\r?\n\r?\n', raw, maxsplit=1)
+    m = re.search(r'\{.*\}', parts[1] if len(parts) > 1 else raw, re.S)
+    return m.group() if m else None
+
+def owner_body(op):
+    for s in op.get("scenarios", []) or []:
+        for r in (s.get("requests") or [s]):
+            b = body((r.get("response") or {}).get("rawPayload"))
+            if b: return b
+    return None
+
+for opid, op in ops.items():
+    auth = [e for e in op.get("authorizationRequestsResults", []) or []
+            if "swapping" in (e.get("test") or {}).get("key", "")
+            and (e.get("outcome") or {}).get("status") == "defective"]
+    if not auth: continue
+    method = (op.get("method") or "").upper()
+    ob = owner_body(op)
+    for e in auth:
+        ab = body((e.get("response") or {}).get("rawPayload"))
+        same = ab is not None and ab == ob
+        print(f"{opid} [{method}] bodies_identical={same}")
+        print(f"    owner:    {(ob or '(none)')[:120]}")
+        print(f"    attacker: {(ab or '(none)')[:120]}")
+EOF
+```
+
+```powershell
+# Windows
+$raw = Get-Content "$env:TEMP\42c-scan-out.json" -Raw
+$d = ([regex]::Match($raw, '\{[\s\S]*\}')).Value | ConvertFrom-Json
+function Get-JsonBody($b64) {
+  if (-not $b64) { return $null }
+  $txt = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64))
+  $body = ($txt -split "(?s)\r?\n\r?\n", 2)[1]
+  $m = [regex]::Match([string]$body, '(?s)\{.*\}')
+  if ($m.Success) { $m.Value } else { $null }
+}
+foreach ($p in $d.report.operations.PSObject.Properties) {
+  $op = $p.Value
+  $auth = @($op.authorizationRequestsResults | Where-Object { $_.test.key -like '*swapping*' -and $_.outcome.status -eq 'defective' })
+  if (-not $auth) { continue }
+  $ob = $null
+  foreach ($s in $op.scenarios) {
+    $steps = @($s.requests); if (-not $steps) { $steps = @($s) }
+    foreach ($r in $steps) { $b = Get-JsonBody $r.response.rawPayload; if ($b) { $ob = $b; break } }
+    if ($ob) { break }
+  }
+  foreach ($e in $auth) {
+    $ab = Get-JsonBody $e.response.rawPayload
+    $same = ($ab -and $ab -eq $ob)
+    Write-Host "$($p.Name) [$($op.method.ToUpper())] bodies_identical=$same"
+    Write-Host "    owner:    $ob"
+    Write-Host "    attacker: $ab"
+  }
+}
+```
+
+Classify each **read** finding from the output:
+- `bodies_identical=True`, or the attacker body otherwise carries the victim's
+  distinguishing data → **confirmed** BOLA/BFLA; render in the 🔴 tier.
+- attacker body reflects only the **caller's own** data, or is empty/redacted →
+  **not confirmed** (owner-scoped 2xx). Do not render it as 🔴; list it under a
+  one-line note: *"Authorization — needs manual review: 2xx on the swap but no
+  cross-user data returned (likely owner-scoped)."*
+
+Byte-identical bodies are the strong positive signal. When bodies differ only in
+non-deterministic fields (timestamps, echoed request ids), judge by whether the
+attacker's body contains the victim's distinguishing values, not strict equality.
+State-changing findings from the routing above are confirmed without this check.
+
 ### 12a — Render the risk-classified findings report
 
 Before touching anything, display the full scan picture grouped into three tiers.
@@ -1438,14 +1330,14 @@ Mandatory behavior:
 Scan Results  |  SQG (<sqg-name>): PASSED / FAILED
 ```
 
-**Free Trial mode header:**
+**Token mode header:**
 ```
-Scan Results  |  SQG: N/A (Free Trial — no scan SQG enforced)
+Scan Results  |  SQG: N/A (Token mode — no scan SQG enforced)
 ```
 
 ```
 ── 🔴 Authorization Failures (BOLA / BFLA) ────────────────────────────────
-  (for each confirmed auth failure)
+  (for each finding confirmed in 12a-0 — owner-scoped 2xx go to "needs review", not here)
   Operation:  <HTTP method> <path>
   Test:       BOLA (accessed with user-2 token) / BFLA (accessed with low-priv token)
   Risk:       Horizontal privilege escalation — user B can read/modify user A's
@@ -1500,14 +1392,14 @@ Mandatory behavior:
 - If a tier is empty, say so explicitly; do not silently omit it.
 
 **Platform mode:**
-1. All **authorization failures** (BOLA/BFLA confirmed) → always a fix candidate.
+1. All **authorization failures confirmed in 12a-0** (BOLA/BFLA) → always a fix candidate. "Needs review" owner-scoped 2xx are **not** fix candidates — they are surfaced for manual review only.
 2. **Conformance findings matched in `sqgDetails[].blockingRules`** → fix candidate
    regardless of severity.
 3. Conformance findings **not** in `sqgDetails[].blockingRules` → surface only;
    do not include in the fix list.
 
-**Free Trial mode:**
-1. All **authorization failures** (BOLA/BFLA confirmed) → always a fix candidate.
+**Token mode:**
+1. All **authorization failures confirmed in 12a-0** (BOLA/BFLA) → always a fix candidate. "Needs review" owner-scoped 2xx are **not** fix candidates — they are surfaced for manual review only.
 2. There are no SQG-blocking conformance findings — all conformance findings are
    informational. Surface them to the user and ask which (if any) they want to fix.
 
@@ -1523,8 +1415,8 @@ Mandatory behavior:
 - **question**: `"Here is the complete scan report (shown above). I can apply the following fixes to <filename>: 🔴 Authorization fixes: [list] 🟠 SQG-blocking conformance fixes: [list]. The 🟡 informational findings are not SQG-blocking and will not be fixed automatically — let me know if you'd like to address any of them too. What would you like to do?"`
 - **options**: `["Yes — apply all fixes now", "Show me the diff first", "No — skip fixes for now"]`
 
-**Free Trial mode** — call `AskQuestion`:
-- **question**: `"Here is the complete scan report (shown above). No SQG enforcement applies in free trial mode. 🔴 Authorization fixes I can apply: [list] 🟡 Conformance findings (informational — your call whether to fix): [list]. What would you like to do?"`
+**Token mode** — call `AskQuestion`:
+- **question**: `"Here is the complete scan report (shown above). No SQG enforcement applies in token mode. 🔴 Authorization fixes I can apply: [list] 🟡 Conformance findings (informational — your call whether to fix): [list]. What would you like to do?"`
 - **options**: `["Yes — apply the authorization fixes", "Show me the diff first", "No — skip fixes; summarise findings only"]`
 
 If the user chooses **"Show me the diff first"** in either mode, display the proposed
@@ -1661,7 +1553,7 @@ If the user selects **Yes — fix more issues**:
 If the user selects **No — present the final scan summary**:
 - Proceed to the final scan summary output.
 
-**Free Trial mode**: `sqgPass` is always `true` or absent — Step 12h is a no-op; proceed directly to the final scan summary output.
+**Token mode**: `sqgPass` is always `true` or absent — Step 12h is a no-op; proceed directly to the final scan summary output.
 
 ---
 

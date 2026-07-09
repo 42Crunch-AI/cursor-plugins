@@ -39,7 +39,7 @@ explain what they'll be able to do once setup is complete:
 >
 > I'll handle this in two quick steps:
 > 1. Install the `42c-ast` analysis binary on this machine.
-> 2. Connect your 42Crunch credentials (existing platform account or free account).
+> 2. Connect your 42Crunch credentials (a token from Starter (Free Trial) / Individual / Individual Pro, or a Platform account with an API key for Team 10 / Team 25 / Enterprise).
 >
 > Let's go.
 
@@ -60,16 +60,22 @@ The procedure covers, in order:
   `~/.42crunch/conf/env` (macOS/Linux) or `%APPDATA%\42Crunch\conf\env`
   (Windows). If already configured: show mode + masked key, offer to keep or replace.
 - If not configured (or replacing): walk the user through the guided flow:
-  - **Are you an existing 42Crunch user?**
-    - Yes → enter API Key → select Platform URL (US / EU / Other)
-    - No → **Are you a registered 42Crunch Free Trial user?**
-      - Yes → enter Free Trial Token
-      - No → show registration link (`[42Crunch Free Trial](https://42crunch.com/freemium/?source=cursor)`) and stop
+  - **Do you have a 42Crunch Subscription?**
+    - No → show Starter (Free Trial) registration link (`[42Crunch Starter (Free Trial)](https://42crunch.com/freemium/?source=claude)`) and the paid-plans pricing breakdown (Individual / Individual Pro use a token; Team 10 / Team 25 / Enterprise use a Platform account with an API key); stop and wait for the user to return, then ask token vs Platform-API-key and route accordingly
+    - Yes → **Do you have a token, or a Platform account with an API key?**
+      - Token (Starter (Free Trial) / Individual / Individual Pro) → enter token
+      - Platform API key (Team 10 / Team 25 / Enterprise) → enter API Key → select Platform URL (US / EU / Other)
 - Write credentials to `~/.42crunch/conf/env`, set `chmod 600` on macOS/Linux.
 
 ### Step 4 — Final verification
 
-Run a quick end-to-end check:
+Steps 2 and 3 already end with their own verification: `binary-setup.md`
+confirms `--version` exits 0, and `credential-setup.md` Step 4 confirms the
+credential line is present. If both results are already in this conversation,
+do **not** re-run those commands — reuse the results and continue to Step 5.
+
+Only run the checks below for a part whose result is missing from this
+conversation. The credential check is presence-only — never print the value:
 
 ```bash
 # Binary (macOS / Linux)
@@ -83,12 +89,12 @@ Run a quick end-to-end check:
 
 ```bash
 # Credentials (macOS / Linux)
-grep -E "^(API_KEY|TRIAL_TOKEN)=" "$HOME/.42crunch/conf/env"
+grep -qE "^(API_KEY|TRIAL_TOKEN)=" "$HOME/.42crunch/conf/env" && echo "CREDS=OK" || echo "CREDS=MISSING"
 ```
 
 ```powershell
 # Credentials (Windows)
-Select-String -Path "$env:APPDATA\42Crunch\conf\env" -Pattern "^(API_KEY|TRIAL_TOKEN)="
+if (Select-String -Path "$env:APPDATA\42Crunch\conf\env" -Pattern "^(API_KEY|TRIAL_TOKEN)=" -Quiet) { "CREDS=OK" } else { "CREDS=MISSING" }
 ```
 
 If either check fails, report the specific failure and guide the user to resolve
@@ -132,11 +138,11 @@ off.
 | Item             | Status                                              |
 |------------------|-----------------------------------------------------|
 | Binary           | <BINARY_PATH> v<version>                            |
-| Credential mode  | <Platform \| Free Trial>                            |
+| Credential mode  | <Platform \| Token>                                 |
 | API key / Token  | Platform: `api_••••••••` or `ide_••••••••`          |
-|                  | Free Trial: `<first-4-chars>••••••••`               |
+|                  | Token: `<first-4-chars>••••••••`                    |
 |                  | (stored in <path>)                                  |
-| Platform host    | <url>  ← omit this row for free trial mode          |
+| Platform host    | <url>  ← omit this row for Token mode               |
 
 ```
 
@@ -146,9 +152,9 @@ off.
 
 - All detection steps (binary check, credential check) run silently. Surface
   output only on failure or when prompting the user.
-- Never print the API key or Free Trial token in plaintext after the user enters
+- Never print the API key or token in plaintext after the user enters
   it. Always mask it (`api_••••••••` / `ide_••••••••` for platform tokens — keep
-  prefix, replace rest; `<first-4-chars>••••••••` for free trial tokens, e.g.
+  prefix, replace rest; `<first-4-chars>••••••••` for tokens, e.g.
   `eyJh••••••••`).
 - Use the `Shell` tool for all shell commands; use `StrReplace` or
   `Write` when writing config files — never shell redirection.
@@ -161,6 +167,6 @@ off.
 
 | Variable        | Default                          | Mode            |
 |-----------------|----------------------------------|-----------------|
-| `API_KEY`       | *(required)*                     | Platform        |
-| `PLATFORM_HOST` | *(set during setup)*             | Platform only   |
-| `TRIAL_TOKEN`   | *(required)*                     | Free Trial      |
+| `API_KEY`       | *(required)*                     | Platform (Team 10 / Team 25 / Enterprise) |
+| `PLATFORM_HOST` | *(set during setup)*             | Platform only (Team 10 / Team 25 / Enterprise) |
+| `TRIAL_TOKEN`   | *(required)*                     | Token-based (Starter (Free Trial) / Individual / Individual Pro) |
