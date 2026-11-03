@@ -50,7 +50,7 @@ Announce:
 > **Individual Pro** it means this month's Security Tokens are used up (the
 > quota resets with your next monthly cycle)."
 
-Call `AskUserQuestion`:
+Call `AskQuestion`:
 - **question**: `"How would you like to proceed?"`
 - **options**: `["Upgrade my plan now", "I'm on Individual / Individual Pro — I'll wait for my monthly reset", "Not now — cancel"]`
 
@@ -106,29 +106,27 @@ Individual and Individual Pro issue a token, while Team 10, Team 25, and
 Enterprise use a Platform account with an API key, so one question routes
 to the right path:
 
-Call `AskUserQuestion`:
+Call `AskQuestion`:
 - **question**: `"How do you access your new plan?"`
 - **options**: `["I have a new access token (Individual or Individual Pro)", "I have a Platform API key (Team 10, Team 25, or Enterprise)"]`
 
 ### Path A — Token-based plans (Individual, Individual Pro)
 
-Call `AskUserQuestion`:
-- **question**: `"Please paste your new plan token (same format as your previous token):"`
+Ask conversationally: "Please paste your new plan token (same format as your previous token):"
 
 Wait for input. Store value as `TRIAL_TOKEN`. Continue to Step 5.
 
 ### Path B — Platform plans (Team 10, Team 25, Enterprise)
 
-Call `AskUserQuestion`:
-- **question**: `"Please enter your Platform API Key (it usually starts with api_ or ide_):"`
+Ask conversationally: "Please enter your Platform API Key (it usually starts with api_ or ide_):"
 
-Wait for input. Then call `AskUserQuestion`:
+Wait for input. Then call `AskQuestion`:
 - **question**: `"Which region hosts your 42Crunch platform? (Your organisation's IT or security team can confirm this — it's also visible in the URL when you log in.)"`
 - **options**: `["US — https://us.42crunch.cloud/", "EU — https://eu.42crunch.cloud/", "Other — I'll enter my platform URL manually"]`
 
 - If **US** chosen: `PLATFORM_HOST=https://us.42crunch.cloud`
 - If **EU** chosen: `PLATFORM_HOST=https://eu.42crunch.cloud`
-- If **Other** chosen: call `AskUserQuestion` — **question**: `"Please enter your platform URL (e.g. https://your-org.42crunch.cloud):"` — store response as `PLATFORM_HOST`. Trim any trailing slashes.
+- If **Other** chosen: ask conversationally — "Please enter your platform URL (e.g. https://your-org.42crunch.cloud):" — store response as `PLATFORM_HOST`. Trim any trailing slashes.
 
 Store values as `API_KEY` and `PLATFORM_HOST`. Continue to Step 5.
 

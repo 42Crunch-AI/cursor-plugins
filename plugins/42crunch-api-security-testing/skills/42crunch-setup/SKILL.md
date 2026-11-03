@@ -61,7 +61,7 @@ The procedure covers, in order:
   (Windows). If already configured: show mode + masked key, offer to keep or replace.
 - If not configured (or replacing): walk the user through the guided flow:
   - **Do you have a 42Crunch Subscription?**
-    - No → show Starter (Free Trial) registration link (`[42Crunch Starter (Free Trial)](https://42crunch.com/freemium/?source=claude)`) and the paid-plans pricing breakdown (Individual / Individual Pro use a token; Team 10 / Team 25 / Enterprise use a Platform account with an API key); stop and wait for the user to return, then ask token vs Platform-API-key and route accordingly
+    - No → show Starter (Free Trial) registration link (`[42Crunch Starter (Free Trial)](https://42crunch.com/freemium/?source=cursor)`) and the paid-plans pricing breakdown (Individual / Individual Pro use a token; Team 10 / Team 25 / Enterprise use a Platform account with an API key); stop and wait for the user to return, then ask token vs Platform-API-key and route accordingly
     - Yes → **Do you have a token, or a Platform account with an API key?**
       - Token (Starter (Free Trial) / Individual / Individual Pro) → enter token
       - Platform API key (Team 10 / Team 25 / Enterprise) → enter API Key → select Platform URL (US / EU / Other)

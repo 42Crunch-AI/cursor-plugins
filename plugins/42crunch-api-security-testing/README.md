@@ -1,6 +1,6 @@
 # 42Crunch API Security Plugin
 
-Automate API security directly in Cursor with 42Crunch - audit OpenAPI specs, detect vulnerabilities aligned with OWASP API Security risks (including BOLA/BFLA), and apply AI-powered fixes.
+Automate API security directly in Cursor with 42Crunch - audit OpenAPI specs and GraphQL schemas, detect vulnerabilities aligned with OWASP API Security risks (including BOLA/BFLA), and apply AI-powered fixes.
 
 ## Overview
 
@@ -11,16 +11,16 @@ The `42crunch-api-security-testing` plugin is designed for AI-assisted developme
 | Skill | Description |
 |---|---|
 | [`/42crunch-setup`](./README.md#42crunch-setup) | Install the `42c-ast` binary and configure credentials (one-time) |
-| [`/42crunch-audit`](./README.md#42crunch-audit) | Static security audit of an OpenAPI Specification file with scored findings and AI-assisted fixes |
-| [`/42crunch-scan`](./README.md#42crunch-scan) | Live conformance and authorization scan (BOLA/BFLA) against a running API |
-| [`/42crunch-api-security-testing`](./README.md#42crunch-api-security-testing) | Full audit + scan pipeline in a single session |
+| [`/42crunch-audit`](./README.md#42crunch-audit) | Static security audit of an OpenAPI Specification file or GraphQL schema with scored findings and AI-assisted fixes |
+| [`/42crunch-scan`](./README.md#42crunch-scan) | Live conformance and authorization scan (BOLA/BFLA) against a running REST or GraphQL API |
+| [`/42crunch-api-security-testing`](./README.md#42crunch-api-security-testing) | Full audit + scan pipeline in a single session (OAS or GraphQL) |
 | [`/generate-oas`](./README.md#generate-oas) | Generate a complete `openapi.json` from your API source code, a Postman/Insomnia collection, or both |
 
 ## Prerequisites
 
 - [Cursor](https://cursor.com)
-- A 42Crunch account — [Free Trial](https://42crunch.com/freemium/?source=cursor) or paid (Platform API key)
-- For `42crunch-scan`: a running API server reachable at the URL in `servers[0]` of your OAS (or via `SCAN42C_HOST`)
+- A 42Crunch account — [Starter (Free Trial)](https://42crunch.com/freemium/?source=cursor), a paid token-based plan (Individual or Individual Pro), or a Platform account with an API key (Team 10, Team 25, or Enterprise)
+- For `42crunch-scan`: a running API server reachable at the URL in `servers[0]` of your OAS, or your GraphQL endpoint URL (or via `SCAN42C_HOST`)
 
 The `42c-ast` binary is downloaded and kept up to date automatically on first use.
 
@@ -79,7 +79,7 @@ See [RECIPES.md](./RECIPES.md) for step-by-step guides covering the most common 
 
 ### `42crunch-setup`
 
-Installs the `42c-ast` binary for your OS/architecture, verifies its checksum, and walks you through credential configuration. Supports Platform (API key) and Free Trial (token) modes. Credentials are stored in `~/.42crunch/conf/env` with `600` permissions.
+Installs the `42c-ast` binary for your OS/architecture, verifies its checksum, and walks you through credential configuration. Supports Platform (Team 10, Team 25, Enterprise) and Token (Starter (Free Trial), Individual, Individual Pro) modes. Credentials are stored in `~/.42crunch/conf/env` with `600` permissions.
 
 > **Trigger:** "set up 42crunch", "configure 42crunch", "install 42c-ast", "update 42c-ast", "set api key", "42crunch not working", "binary not found"
 
@@ -92,19 +92,28 @@ Installs the `42c-ast` binary for your OS/architecture, verifies its checksum, a
 
 ### `42crunch-audit`
 
-Runs a static analysis of an OpenAPI Specification and produces a 0–100 security score. Findings are classified into four tiers:
+Runs a static analysis of an OpenAPI Specification **or GraphQL schema** and produces a 0–100 security score.
+
+OAS findings are classified into four tiers:
 
 - **SQG-Blocking** — must fix to pass the Security Quality Gate
 - **Security** — recommended fixes
 - **Data Validation** — informational
 - **Spec Conformance** — OAS format defects outside the score/SQG
 
+GraphQL findings are classified into two tiers:
+
+- **Resource Limiting** — missing query-cost and list-size restrictions (the DoS surface)
+- **Data Validation** — built-in scalars and custom scalars missing value constraints
+
+GraphQL fixes annotate the schema with constraint and cost directives (`@stringValue`, `@numberValue`, `@list`, `@cost`); Cursor declares the directive definitions in the SDL and notes that server-side enforcement is a separate step.
+
 Cursor asks your explicit consent before applying any changes, then re-runs the audit to confirm passage.
 
-**Platform mode:** SQG threshold enforced from your platform policy.  
-**Free Trial mode:** No automated SQG gate; you set the target score and blocking severity for the session.
+**Platform mode:** SQG threshold enforced from your platform policy (GraphQL SQGs are configured on the platform like OAS SQGs).  
+**Token mode:** No automated SQG gate; you set the target score (and, for OAS, blocking severity) for the session.
 
-> **Trigger:** "run audit", "42crunch audit", "fix audit issues", "SQG audit", "audit score"
+> **Trigger:** "run audit", "42crunch audit", "fix audit issues", "SQG audit", "audit score", "audit my graphql schema"
 
 **Usage:**
 ```
@@ -112,26 +121,28 @@ Cursor asks your explicit consent before applying any changes, then re-runs the 
 ```
 
 Cursor will prompt for:
-1. OpenAPI Specification file
+1. OpenAPI Specification file or GraphQL schema
 
 ---
 
 ### `42crunch-scan`
 
-Runs a live conformance and authorization test against a running API server. Cursor confirms the target URL, checks reachability, analyses the OAS (operations, auth schemes, BOLA candidates), and presents a scan preview before any configuration begins. After a happy-path validation run, Cursor asks your consent before starting the full fuzzing scan.
+Runs a live conformance and authorization test against a running API server (**REST or GraphQL**). Cursor confirms the target URL, checks reachability, analyses the API definition (operations, auth schemes, dependency chains, BOLA/BFLA candidates), and presents a scan preview before any configuration begins. After a happy-path validation run, Cursor asks your consent before starting the full fuzzing scan.
 
-Findings are classified into three tiers:
+OAS findings are classified into three tiers:
 
 - **Authorization failures** — BOLA/BFLA confirmed
 - **SQG-Blocking conformance** — must fix to pass the Security Quality Gate
 - **Informational conformance** — surfaced for review
 
-Cursor asks your consent before applying any fixes — both OAS contract updates and server-side code changes.
+GraphQL scans use the same three tiers. A GraphQL schema declares no auth, so Cursor asks how your API authenticates (a login mutation, a bearer token, or an API-key header) and for a second user (BOLA) or an admin (BFLA) when the schema has candidates. Because GraphQL servers often refuse with HTTP 200 and an error in the body, each authorization finding is confirmed against the response data before it is reported.
+
+Cursor asks your consent before applying any fixes — both contract updates (OAS or SDL) and server-side code/resolver changes.
 
 **Platform mode:** SQG enforced from platform policy.  
-**Free Trial mode:** All findings presented informally; you decide what to fix.
+**Token mode:** All findings presented informally; you decide what to fix.
 
-> **Trigger:** "run scan", "scan only", "conformance test", "BOLA test", "BFLA test", "42crunch scan", "scan config"
+> **Trigger:** "run scan", "scan only", "conformance test", "BOLA test", "BFLA test", "42crunch scan", "scan config", "scan my graphql api"
 
 **Usage:**
 ```
@@ -139,14 +150,14 @@ Cursor asks your consent before applying any fixes — both OAS contract updates
 ```
 
 Cursor will prompt for:
-1. OpenAPI Specification file
+1. OpenAPI Specification file or GraphQL schema
 2. API host endpoint
 
 ---
 
 ### `42crunch-api-security-testing`
 
-Orchestrates Audit (Phase 1) and Scan (Phase 2) in sequence. Resolves the OAS file and confirms the scan target URL up front. Each phase requires separate user consent. Produces a combined summary covering both phases.
+Orchestrates Audit (Phase 1) and Scan (Phase 2) in sequence for a REST or GraphQL API. Resolves the API definition and confirms the scan target URL up front. Each phase requires separate user consent. Produces a combined summary covering both phases.
 
 > **Trigger:** "run audit and scan", "full 42crunch pipeline", "full security check", "audit then scan", "SQG"
 
@@ -156,7 +167,7 @@ Orchestrates Audit (Phase 1) and Scan (Phase 2) in sequence. Resolves the OAS fi
 ```
 
 Cursor will prompt for:
-1. OpenAPI Specification file
+1. OpenAPI Specification file or GraphQL schema
 2. API host endpoint
 
 ---
@@ -196,7 +207,7 @@ Credentials are read from `~/.42crunch/conf/env` (macOS/Linux) or `%APPDATA%\42C
 |---|---|---|
 | `API_KEY` | Platform token (`api_*` or `ide_*`) | Platform |
 | `PLATFORM_HOST` | 42Crunch platform base URL (e.g. `https://us.42crunch.cloud`) | Platform |
-| `TRIAL_TOKEN` | Free Trial token (Base64) | Free Trial |
+| `TRIAL_TOKEN` | Access token (Base64) for Starter (Free Trial), Individual, or Individual Pro — variable name kept for backward compatibility | Token |
 | `SCAN42C_HOST` | Override scan target URL (overrides `servers[0]` in OAS) | Both |
 
 Credentials are never printed in plaintext after entry.
