@@ -122,7 +122,7 @@ Wait for input. Store value as `TRIAL_TOKEN`. Continue to Step 3.
 Inform the user:
 > No problem — getting a free account takes a minute.
 >
-> 1. Visit **[42Crunch Starter (Free Trial)](https://42crunch.com/freemium/?source=claude)**.
+> 1. Visit **[42Crunch Starter (Free Trial)](https://42crunch.com/freemium/?source=cursor)**.
 > 2. Fill in your email address, accept terms and conditions and click Submit.
 > 3. Check your inbox for a confirmation email that includes your token.
 >
